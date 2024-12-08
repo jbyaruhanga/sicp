@@ -1,0 +1,127 @@
+
+#lang racket
+;; Import necessary libraries
+(require racket/string)
+(require csv)
+(require plot) 
+
+
+; Abstraction 1: Data Fetching
+
+; Read the CSV file and return rows as a list of lists 
+(define (read-csv filepath)
+  (let ((in-port (open-input-file filepath)))
+    (let loop ((lines '()))
+      (let ((line (read-line in-port 'any)))
+        (if (eof-object? line)
+            (begin
+              (close-input-port in-port)
+              (reverse lines))  ; Reverse the list to maintain original row order
+            (loop (cons (string-split line ",") lines)))))))
+
+; Fetch tweets from the CSV. 
+(define (fetch-tweets-from-csv filepath)
+  (map (lambda (row) (list (cons 'text (car row))))
+       (read-csv filepath)))
+
+
+; Abstraction 2: Data Cleaning
+
+; Clean tweet text by converting to lowercase to ensure consistency for analysis
+(define (clean-tweet tweet)
+  (let ((text (cdr (assoc 'text tweet))))  ; Get the tweet text from the association list
+    (list (cons 'text (string-downcase text))))) ; Convert to lowercase
+
+; Apply cleaning to a list of tweets
+(define (clean-tweets tweets)
+  (map clean-tweet tweets))
+
+
+; Abstraction 3: Sentiment Analysis
+
+
+; Classify the sentiment of a tweet based on simple keyword matching
+(define (classify-sentiment tweet)
+  (let ((text (cdr (assoc 'text tweet))))  
+    (cond ((string-contains? text "happiness") 'positive) ; Positive sentiment
+          ((string-contains? text "sad") 'negative)     ; Negative sentiment
+          (else 'neutral))))  ; Default to neutral sentiment
+
+; Analyze sentiment for each tweet in the list
+(define (analyze-sentiments tweets)
+  (map classify-sentiment tweets))
+
+
+; Abstraction 4: Aggregation
+
+
+; Aggregate sentiment counts (positive, negative, neutral)
+(define (aggregate-sentiments sentiments)
+  (let* ((positive (length (filter (lambda (s) (eq? s 'positive)) sentiments))) ; Count positives
+         (negative (length (filter (lambda (s) (eq? s 'negative)) sentiments))) ; Count negatives
+         (neutral (length (filter (lambda (s) (eq? s 'neutral)) sentiments)))) ; Count neutrals
+    ; Add default values if all counts are zero (ensures non-empty trends)
+    (if (and (= positive 0) (= negative 0) (= neutral 0))
+        `((positive . 1) (negative . 1) (neutral . 1))  ; Default counts if no data
+        `((positive . ,positive) 
+          (negative . ,negative)
+          (neutral . ,neutral)))))
+
+
+; Abstraction 5: Exporting Data
+
+
+; Export sentiment trends (aggregated counts) to a text file
+(define (export-trends-to-file trends filepath)
+  (let ((out-port (open-output-file filepath)))  ; Open the output file for writing
+    (for-each (lambda (trend)
+                (let ((label (symbol->string (car trend)))  ; Convert symbol to string
+                      (count (cdr trend)))  ; Get the count for the sentiment
+                  (display label out-port)  ; Write label (sentiment type)
+                  (display "\t" out-port)   ; Tab separator
+                  (display count out-port)  ; Write the sentiment count
+                  (newline out-port)))      ; Newline after each entry
+              trends)
+    (close-output-port out-port)))  ; Close the file after writing
+
+
+; Abstraction 6: Generating Histogram
+
+
+; Generate a histogram based on sentiment trends using gnuplot
+(define (generate-histogram trends)
+  (let ((data-file "sentiment_data.txt")
+        (script-file "gnuplot_script.gp")
+        (output-file "sentiment_trends.png"))
+    ; Write the sentiment data to a file
+    (export-trends-to-file trends data-file)
+    ; Write the gnuplot script to generate the histogram
+    (let ((out-port (open-output-file script-file)))
+      (display "set terminal pngcairo size 800,600 enhanced font 'Verdana,10'\n" out-port)  ; Set image format
+      (display (string-append "set output '" output-file "'\n") out-port)  ; Set output file
+      (display "set boxwidth 0.5\n" out-port)  ; Set the bar width for the histogram
+      (display "set style fill solid\n" out-port)  ; Fill bars with solid color
+      (display "set title 'Sentiment Trends'\n" out-port)  ; Title of the histogram
+      (display "set ylabel 'Frequency'\n" out-port)  ; Label for the Y-axis
+      (display "set xlabel 'Sentiment'\n" out-port)  ; Label for the X-axis
+      (display "set yrange [0:*]\n" out-port)  ; Dynamic Y-range to handle zero counts
+      (display "plot 'sentiment_data.txt' using 2:xtic(1) with histogram title 'Counts' lc rgb 'blue'\n" out-port)  ; Plot data
+      (close-output-port out-port))  ; Close the script file
+    ; Execute the gnuplot script to generate the histogram
+    (system (string-append "gnuplot " script-file))
+    (display (string-append "Histogram generated: " output-file "\n"))))
+
+
+; Main Pipeline Abstraction
+
+
+; Main function to execute the entire analysis pipeline
+(define (analyze-tweets-from-csv filepath)
+  (let* ((tweets (fetch-tweets-from-csv filepath))         ; Fetch raw tweets
+         (cleaned-tweets (clean-tweets tweets))             ; Clean the tweet text
+         (sentiments (analyze-sentiments cleaned-tweets))   ; Classify sentiment of each tweet
+         (trends (aggregate-sentiments sentiments)))        ; Aggregate sentiment counts
+    (generate-histogram trends)))  ; Generate and display the histogram
+
+.
+(analyze-tweets-from-csv "tweets.csv")
